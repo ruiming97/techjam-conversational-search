@@ -16,32 +16,41 @@ class RetrievalModule:
         top_k: int = 50,
     ) -> RetrievalResult:
         phrases: list[str] = []
+        constraint_terms: list[str] = []
+
+        # 1. Extract exact phrases and individual terms from constraints
         for c in constraints:
             words = tokenize(c.value)
-            if len(words) >= 2:
+            if len(words) >= 1:
                 phrases.append(" ".join(words[:6]))
+                constraint_terms.extend(words)
 
-        terms = tokenize(query_text)
-        for c in constraints:
-            terms.extend(tokenize(c.value))
-        terms = list(dict.fromkeys(terms))
-
-        if not terms and not phrases:
-            return RetrievalResult(ranked_asins=[], scores=[])
+        # 2. Extract base query terms
+        base_terms = tokenize(query_text)
+        all_unique_terms = list(dict.fromkeys(base_terms + constraint_terms))
 
         parts: list[str] = []
+        
+        # 3. Add exact constraint phrases multiple times
+        # This artificially skews the FTS5 math so exact phrase matches skyrocket to the top
         for phrase in phrases:
             parts.append(f'"{phrase}"')
-        for t in terms:
+            parts.append(f'"{phrase}"') # 2x multiplier
+            parts.append(f'"{phrase}"') # 3x multiplier
+            
+        # 4. The Safety Net: Add all individual terms once
+        for t in all_unique_terms:
             parts.append(f'"{t}"')
 
         expression = " OR ".join(parts)
-        if not expression:
+        if not expression and not parts:
             return RetrievalResult(ranked_asins=[], scores=[])
 
+        # 5. Execute standard BM25 with the heavily weighted expression
         results = self._catalog.bm25_search_raw(expression, limit=top_k)
+        
         return RetrievalResult(
             ranked_asins=[asin for asin, _ in results],
             scores=[score for _, score in results],
-            method="bm25",
+            method="bm25_boosted",
         )
