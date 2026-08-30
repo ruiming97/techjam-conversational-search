@@ -12,8 +12,8 @@ COLOR_RE = re.compile(r"\b(?:" + "|".join(COLORS) + r")\b", re.I)
 BM25_WEIGHTS = (0.0, 6.0, 4.0, 2.5, 2.5, 1.5, 1.0)
 
 ASK_STRATEGY_ORDER = [
-    "other", "other", "feature", "material", "other",
-    "feature", "material", "color", "style", "other",
+    "budget", "size", "material", "feature", "color",
+    "style", "use_case", "brand", "feature", "other",
 ]
 
 ATTRIBUTE_MESSAGES = {
