@@ -20,32 +20,33 @@ class RetrievalModule:
     ) -> RetrievalResult:
         phrases: list[str] = []
         constraint_terms: list[str] = []
+
         for c in constraints:
             words = tokenize(c.value)
-            if words:
+            if len(words) >= 1:
                 phrases.append(" ".join(words[:6]))
                 constraint_terms.extend(words)
 
-        terms = list(dict.fromkeys(tokenize(query_text) + constraint_terms))
-
-        if not terms and not phrases:
-            return RetrievalResult(ranked_asins=[], scores=[])
+        base_terms = tokenize(query_text)
+        all_unique_terms = list(dict.fromkeys(base_terms + constraint_terms))
 
         parts: list[str] = []
-        # SQLite FTS5's bm25() sums a term's contribution per occurrence in an
-        # OR expression, so repeating a constraint phrase inflates its weight
-        # relative to the single-occurrence terms below (verified empirically:
-        # 3 repeats -> ~3x that phrase's score contribution).
+        
         for phrase in phrases:
-            parts.extend([f'"{phrase}"'] * _PHRASE_BOOST)
-        for t in terms:
+            parts.append(f'"{phrase}"')
+            parts.append(f'"{phrase}"') # 2x multiplier
+            parts.append(f'"{phrase}"') # 3x multiplier
+           
+        for t in all_unique_terms:
             parts.append(f'"{t}"')
 
         expression = " OR ".join(parts)
-        if not expression:
+        if not expression and not parts:
             return RetrievalResult(ranked_asins=[], scores=[])
 
+        # 5. Execute standard BM25 with the heavily weighted expression
         results = self._catalog.bm25_search_raw(expression, limit=top_k)
+        
         return RetrievalResult(
             ranked_asins=[asin for asin, _ in results],
             scores=[score for _, score in results],
