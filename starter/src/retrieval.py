@@ -4,6 +4,9 @@ from starter.src.catalog_index import CatalogIndex, tokenize
 from starter.src.interfaces import Constraint, RetrievalResult
 
 
+_PHRASE_BOOST = 3
+
+
 class RetrievalModule:
 
     def __init__(self, catalog: CatalogIndex) -> None:
@@ -16,22 +19,25 @@ class RetrievalModule:
         top_k: int = 50,
     ) -> RetrievalResult:
         phrases: list[str] = []
+        constraint_terms: list[str] = []
         for c in constraints:
             words = tokenize(c.value)
-            if len(words) >= 2:
+            if words:
                 phrases.append(" ".join(words[:6]))
+                constraint_terms.extend(words)
 
-        terms = tokenize(query_text)
-        for c in constraints:
-            terms.extend(tokenize(c.value))
-        terms = list(dict.fromkeys(terms))
+        terms = list(dict.fromkeys(tokenize(query_text) + constraint_terms))
 
         if not terms and not phrases:
             return RetrievalResult(ranked_asins=[], scores=[])
 
         parts: list[str] = []
+        # SQLite FTS5's bm25() sums a term's contribution per occurrence in an
+        # OR expression, so repeating a constraint phrase inflates its weight
+        # relative to the single-occurrence terms below (verified empirically:
+        # 3 repeats -> ~3x that phrase's score contribution).
         for phrase in phrases:
-            parts.append(f'"{phrase}"')
+            parts.extend([f'"{phrase}"'] * _PHRASE_BOOST)
         for t in terms:
             parts.append(f'"{t}"')
 
@@ -43,5 +49,5 @@ class RetrievalModule:
         return RetrievalResult(
             ranked_asins=[asin for asin, _ in results],
             scores=[score for _, score in results],
-            method="bm25",
+            method="bm25_boosted",
         )
