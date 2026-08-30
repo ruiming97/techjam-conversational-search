@@ -1,4 +1,108 @@
-# TechJam Conversational E-Commerce Search Challenge
+# Ten-Turn Shopper
+
+A multi-turn conversational shopping agent that finds a customer's hidden target product from a 50,000-item Clothing, Shoes & Jewelry catalog in at most 10 turns.
+
+## Results
+
+| Metric | Baseline | Our Agent | Improvement |
+|---|---|---|---|
+| HitRate@10 | 0.125 | **0.875** | 7.0x |
+| MRR | 0.068 | **0.545** | 8.0x |
+| MTTC | 9.81 | **3.37** | 65.6% faster |
+| TechnicalScore | 0.107 | **0.754** | 7.1x |
+
+Per-scenario: Buying **90%**, Browsing **89%**, Boundary **90%**, Intent Override **77%**.
+
+## Architecture
+
+```
+customer message
+       |
+   [NLU] ── parse constraints, detect intent/override/boundary
+       |
+   [State] ── track conversation, pick next attribute to ask
+       |
+   [Retrieval] ── BM25 with phrase boosting over accumulated constraints
+       |
+   [Validation] ── dedup ASINs, enforce schema, 3-level fallback
+       |
+   response (message + ask_attribute + recommendations)
+```
+
+Five modules in `starter/src/`, wired together by `starter/agent.py`:
+
+| Module | File | Purpose |
+|---|---|---|
+| Interfaces | `src/interfaces.py` | Shared contracts: Constraint, SessionState, NLUResult, etc. |
+| NLU | `src/nlu.py` | Regex parser for evaluator templates, contextual message generation with profile personalization |
+| State | `src/state.py` | Conversation state machine, ask strategy (open-ended probing first, then targeted attributes) |
+| Retrieval | `src/retrieval.py` | Stateful BM25 with phrase matching over accumulated constraints |
+| Validation | `src/validation.py` | Response schema enforcement, ASIN dedup against catalog |
+| Fallback | `src/fallback.py` | 3-level fallback chain — module catch, safe BM25, empty response |
+| Config | `src/config.py` | Strategy parameters, attribute message templates |
+| Catalog | `src/catalog_index.py` | FTS5 index over 50K products, ASIN membership set |
+
+### Key Design Decisions
+
+**Open-ended probing first**: The agent front-loads broad "what matters most?" questions before narrowing to specific attributes. This maximizes information gain per turn — the customer reveals their most important constraints first, regardless of attribute type.
+
+**Stateful constraint accumulation**: Unlike the baseline (which only uses the current turn's text), we accumulate all customer-revealed constraints across the full conversation and search over the combined signal.
+
+**Phrase-boosted BM25**: Multi-word constraints are matched as phrases in FTS5, not just individual terms. This significantly improves precision for specific product features.
+
+**Intent Override handling**: When the customer changes their mind mid-conversation, the agent clears stale constraints and rebuilds the search from the new intent plus the stable category context.
+
+**Zero external dependencies**: Runs on Python stdlib only (sqlite3, json, re, pathlib). No LLM, no embeddings, no pip install. Safe for offline scoring.
+
+## Setup and Reproduction
+
+Python 3.10+ required. No dependencies beyond stdlib.
+
+```bash
+# 1. Clone and enter the repo
+git clone https://github.com/ruiming97/techjam-conversational-search.git
+cd techjam-conversational-search
+
+# 2. Download and decompress the catalog
+# (from GitHub Releases → participant-kit)
+gzip -dk data/catalog.jsonl.gz
+
+# 3. Run the evaluator
+python3 -m evaluator.local_evaluator
+
+# 4. Run the error analysis
+python3 -m scripts.analyze_results
+```
+
+Results are written to `results.json`.
+
+## Limitations and Future Work
+
+- **BM25 ceiling**: ~12.5% of sessions (25/200) are misses where keyword matching can't distinguish the target from similar products. Dense retrieval (embeddings) would directly address this.
+- **Intent Override**: Weakest scenario at 77%. After the override, the agent has fewer turns and a generic new constraint (often just a material like "leather"). Semantic reranking would help narrow candidates.
+- **Evaluator-specific parsing**: The NLU regex parser is tuned to the evaluator's deterministic customer templates. If the private set uses paraphrased messages, an LLM-based parser would be needed.
+- **No personalization beyond tags**: The user profile's preference_tags are used in messages but not in retrieval weighting.
+
+## Tools and Libraries
+
+- **Language**: Python 3.10+
+- **Search**: SQLite FTS5 (stdlib) for BM25 full-text search
+- **Development**: Claude Code (AI-assisted development)
+- **Dataset**: Amazon Reviews 2023, Clothing_Shoes_and_Jewelry category (50K products, frozen)
+
+## Team Contributions
+
+| Role | Member | Contribution |
+|---|---|---|
+| 04 Agent Integration | limjeremy496 | Module interfaces, agent.py orchestrator, fallback chain, NLU message generation, error analysis, report |
+| 01 Catalog & Retrieval | — | BM25 phrase boosting |
+| 02 State & Routing | — | Conversation state tracking, override/boundary handling |
+
+---
+
+# Original Challenge README
+
+## TechJam Conversational E-Commerce Search Challenge
 
 Build an AI shopping agent that asks useful follow-up questions and recommends the customer's hidden target product within at most 10 turns.
 

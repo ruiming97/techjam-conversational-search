@@ -57,8 +57,9 @@ class Agent:
         query_text = self._build_query(state, nlu_result.category_text)
         retrieval = self._retrieval.search(query_text, state.constraints, top_k=50)
 
+        message = self._nlu.generate_message(decision.ask_attribute, state)
         response = {
-            "message": decision.message_template,
+            "message": message,
             "ask_attribute": decision.ask_attribute,
             "recommendations": [{"parent_asin": a} for a in retrieval.ranked_asins],
             "usage": {
