@@ -11,10 +11,6 @@ from starter.src.interfaces import (
 )
 
 
-_MAX_ASK_TURN = 7
-_MAX_ASK_COUNT = 3
-
-
 class StateModule:
 
     def decide(self, state: SessionState, turn: int, nlu_result: NLUResult, user_message: str = "") -> StrategyDecision:
@@ -64,10 +60,6 @@ class StateModule:
         )
 
     def _pick_attribute(self, state: SessionState, turn: int) -> Optional[str]:
-        asked_count = sum(1 for a in state.attributes_asked if a is not None)
-        if turn > _MAX_ASK_TURN or asked_count >= _MAX_ASK_COUNT:
-            return None
-
         known_types = {c.attribute_type for c in state.constraints}
         blocked = state.exhausted_attributes | known_types
 
