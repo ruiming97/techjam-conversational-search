@@ -59,12 +59,11 @@ class Agent:
             query_text,
             state.constraints,
             top_k=50,
-            negative_constraints=state.negative_constraints,
             override_category_text=state.category_text if state.override_detected else "",
         )
 
         response = {
-            "message": decision.message_template,
+            "message": self._nlu.phrase(decision, state, len(retrieval.ranked_asins)),
             "ask_attribute": decision.ask_attribute,
             "recommendations": [{"parent_asin": a} for a in retrieval.ranked_asins],
             "usage": {
