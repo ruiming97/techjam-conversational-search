@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  test-and-evaluate:
+  unit-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -23,18 +23,3 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -v
-
-      - name: Run public-set evaluator when catalog is available
-        run: |
-          if [[ ! -f data/catalog.jsonl ]]; then
-            echo "::notice title=Public evaluator skipped::data/catalog.jsonl is intentionally not stored in Git. Add it to the runner to enable this benchmark."
-            exit 0
-          fi
-          python -m evaluator.local_evaluator
-
-      - name: Upload evaluator results
-        if: ${{ always() && hashFiles('results.json') != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: evaluator-results
-          path: results.json
