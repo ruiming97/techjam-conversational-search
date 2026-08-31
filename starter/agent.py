@@ -60,6 +60,7 @@ class Agent:
             state.constraints,
             top_k=50,
             negative_constraints=state.negative_constraints,
+            override_category_text=state.category_text if state.override_detected else "",
         )
 
         response = {

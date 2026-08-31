@@ -11,6 +11,7 @@ from starter.src.interfaces import Constraint, RetrievalResult
 _CLAUSE_CANDIDATE_LIMIT = 250
 _FALLBACK_CANDIDATE_MULTIPLIER = 5
 _PRICE_CANDIDATE_LIMIT = 250
+_OVERRIDE_CATEGORY_WEIGHT = 2.0
 _BUDGET_AMOUNT_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 _ATTRIBUTE_LABEL_TERMS = frozenset({
     "brand", "budget", "category", "color", "feature", "material",
@@ -92,6 +93,7 @@ class RetrievalModule:
         constraints: list[Constraint],
         top_k: int = 50,
         negative_constraints: list[Constraint] | None = None,
+        override_category_text: str = "",
     ) -> RetrievalResult:
         # Keep each user statement as a clause.  Combining all words into one
         # OR expression makes a product that matches "comfortable" look as
@@ -102,8 +104,15 @@ class RetrievalModule:
             if (preference := _budget_preference(constraint)) is not None
         ]
         text_constraints = [c for c in constraints if c.attribute_type != "budget"]
-        clauses = [(_constraint_terms(c), c.value) for c in text_constraints]
-        clauses = [(terms, raw) for terms, raw in clauses if terms]
+        clauses = [(_constraint_terms(c), c.value, 1.0) for c in text_constraints]
+        # Once the shopper overrides earlier intent, a known category is a
+        # useful guardrail against generic products that happen to share the
+        # new material or color.  Promote it to a weighted clause only then:
+        # before an override, broad category recall remains more important.
+        category_terms = tokenize(override_category_text)
+        if category_terms:
+            clauses.append((category_terms, override_category_text, _OVERRIDE_CATEGORY_WEIGHT))
+        clauses = [(terms, raw, weight) for terms, raw, weight in clauses if terms]
         budget_terms = {
             term
             for constraint in constraints
@@ -112,7 +121,7 @@ class RetrievalModule:
         }
         base_terms = [term for term in tokenize(query_text) if term not in budget_terms]
         all_unique_terms = list(dict.fromkeys(base_terms + [
-            term for clause, _raw in clauses for term in clause
+            term for clause, _raw, _weight in clauses for term in clause
         ]))
         if not all_unique_terms and not budget_preferences:
             return RetrievalResult(ranked_asins=[], scores=[])
@@ -133,8 +142,8 @@ class RetrievalModule:
             1.0 + math.log(
                 (len(self._catalog.asin_set) + 1)
                 / (self._catalog.clause_document_frequency(clause) + 1)
-            )
-            for clause, _raw in clauses
+            ) * weight
+            for clause, _raw, weight in clauses
         ]
         total_clause_weight = sum(clause_weights)
 
@@ -146,7 +155,7 @@ class RetrievalModule:
             # different FTS queries.
             evidence[asin] = [0.0, 0.0, 1.0 / (rank + 1), 0.0]
 
-        for (clause, raw_clause), clause_weight in zip(clauses, clause_weights):
+        for (clause, raw_clause, _weight), clause_weight in zip(clauses, clause_weights):
             complete, phrase_asins = self._catalog.clause_search(
                 clause,
                 limit=_CLAUSE_CANDIDATE_LIMIT,
