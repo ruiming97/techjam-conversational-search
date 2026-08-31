@@ -30,3 +30,11 @@ ATTRIBUTE_MESSAGES = {
 }
 
 LLM_ENABLED = os.environ.get("LLM_ENABLED", "false").lower() == "true"
+
+# Optional live NLU parse (starter/src/nlu.py::_llm_extract). Only used when
+# LLM_ENABLED is true AND an ANTHROPIC_API_KEY is present in the environment;
+# otherwise the agent runs fully offline against the regex/heuristic parser.
+# No key is ever hardcoded or committed here.
+LLM_MODEL = os.environ.get("NLU_LLM_MODEL", "claude-3-5-haiku-20241022")
+LLM_API_URL = "https://api.anthropic.com/v1/messages"
+LLM_TIMEOUT_SECONDS = float(os.environ.get("NLU_LLM_TIMEOUT_SECONDS", "8"))

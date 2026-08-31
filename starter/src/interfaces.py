@@ -52,6 +52,7 @@ class NLUResult:
     exhausted_attribute: Optional[str] = None
     raw_query_terms: list[str] = field(default_factory=list)
     category_text: str = ""
+    parse_method: str = "regex"
 
 
 @dataclass
