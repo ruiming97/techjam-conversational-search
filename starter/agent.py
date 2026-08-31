@@ -68,38 +68,36 @@ class Agent:
         }
         return self._validator.validate(response, top_k)
 
-    _NOISE = frozenset({
-        "those options are not quite right yet",
-        "ask me about one specific attribute",
-        "i don't have an additional preference",
-        "i don't have a preference",
-        "please use your judgment",
-    })
-
     def _build_query(self, state: SessionState, category_text: str) -> str:
-        parts: list[str] = []
-        if state.category_text:
-            parts.append(state.category_text)
-        elif category_text:
-            parts.append(category_text)
-        override_turn = None
-        if state.override_detected:
-            for msg in state.messages:
-                if msg["role"] == "user" and "ignore my earlier" in msg["text"].lower():
-                    override_turn = msg["turn"]
-                    break
-        for msg in state.messages:
-            if msg["role"] != "user" or not msg.get("text"):
-                continue
-            if override_turn and msg["turn"] < override_turn and msg["turn"] != 1:
-                continue
-            text_lower = msg["text"].lower()
-            if any(noise in text_lower for noise in self._NOISE):
-                continue
-            parts.append(msg["text"])
-        for c in state.constraints:
-            parts.append(c.value)
+        """Build retrieval text from the active, user-disclosed shopping state.
+
+        ``RetrievalModule`` already gives structured constraints a phrase boost.
+        Adding the full conversation and profile tags to that query introduced a
+        large number of generic OR terms (for example, ``comfort`` or ``fit``),
+        which could crowd out an exact constraint.  The state is the source of
+        truth for active preferences, so use only its category and constraints
+        whenever either is available.  Profile tags remain useful to make a
+        first-turn recommendation when the user has supplied no searchable
+        information, but they are deliberately a fallback rather than a peer
+        signal.
+        """
+        category = state.category_text or category_text
+        structured_parts: list[str] = []
+        if category:
+            structured_parts.append(category)
+
+        # Preserve constraint phrases, while avoiding repeated copies when a
+        # user restates the same requirement on a later turn.
+        seen = {category.casefold()} if category else set()
+        for constraint in state.constraints:
+            value = constraint.value.strip()
+            normalized = value.casefold()
+            if value and normalized not in seen:
+                structured_parts.append(value)
+                seen.add(normalized)
+
+        if structured_parts:
+            return " ".join(structured_parts)
+
         tags = state.user_profile.get("preference_tags", [])
-        if tags:
-            parts.append(" ".join(str(t) for t in tags))
-        return " ".join(parts)
+        return " ".join(str(tag) for tag in tags if str(tag).strip())

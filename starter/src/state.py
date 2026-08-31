@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
 
-from starter.src.config import ASK_STRATEGY_ORDER, ATTRIBUTE_MESSAGES
+from starter.src.config import (
+    ASK_STRATEGY_ORDER,
+    ATTRIBUTE_MESSAGES,
+    BROAD_DISCOVERY_TURNS,
+    BOUNDARY_BROAD_REASK_ATTRIBUTE,
+    BOUNDARY_BROAD_REASK_MESSAGE,
+    should_broad_reask_after_boundary,
+)
 from starter.src.interfaces import (
     ALLOWED_ATTRIBUTES,
+    Constraint,
     NLUResult,
     SessionState,
     StrategyDecision,
@@ -13,23 +22,29 @@ from starter.src.interfaces import (
 
 class StateModule:
 
+    # Attribute labels are not values: removing them means a rephrasing such
+    # as "color: black" / "black color" remains compatible, while black/red
+    # does not merely match on the word "color".
+    _NON_VALUE_WORDS = frozenset({
+        "a", "an", "and", "around", "at", "budget", "by", "color", "for",
+        "from", "in", "is", "it", "material", "of", "on", "or", "the",
+        "to", "under", "with",
+    })
+
     def decide(self, state: SessionState, turn: int, nlu_result: NLUResult, user_message: str = "") -> StrategyDecision:
         if nlu_result.is_override:
             state.override_detected = True
-            overridden_types = {c.attribute_type for c in nlu_result.new_constraints}
-            new_values_lower = [c.value.lower() for c in nlu_result.new_constraints if c.value]
-
-            def _conflicts(existing_value: str) -> bool:
-                existing_lower = existing_value.lower()
-                return not any(
-                    nv in existing_lower or existing_lower in nv for nv in new_values_lower
-                )
-
+            # Keep stable session context in structured state.  The earlier
+            # free-form transcript may contradict the new intent, and query
+            # construction should never need to recover constraints from it.
+            state.messages.clear()
             state.constraints = [
                 c for c in state.constraints
-                if c.attribute_type not in overridden_types or not _conflicts(c.value)
+                if self._is_compatible_with_override(c, nlu_result.new_constraints)
             ]
-            state.exhausted_attributes -= overridden_types
+            state.exhausted_attributes -= {
+                c.attribute_type for c in nlu_result.new_constraints
+            }
 
         if nlu_result.is_no_preference:
             state.boundary_detected = True
@@ -53,8 +68,14 @@ class StateModule:
         if nlu_result.detected_intent != "unknown" and turn == 1:
             state.scenario_guess = nlu_result.detected_intent
 
-        attr = self._pick_attribute(state, turn)
-        if attr is None:
+        should_broad_reask = should_broad_reask_after_boundary(
+            is_no_preference=nlu_result.is_no_preference,
+            attributes_asked=state.attributes_asked,
+        )
+        attr = BOUNDARY_BROAD_REASK_ATTRIBUTE if should_broad_reask else self._pick_attribute(state, turn)
+        if should_broad_reask:
+            msg = BOUNDARY_BROAD_REASK_MESSAGE
+        elif attr is None:
             msg = "Here are some options based on what you've told me so far."
         else:
             msg = ATTRIBUTE_MESSAGES.get(attr, "What else matters to you?")
@@ -68,7 +89,59 @@ class StateModule:
             strategy_note=f"turn={turn} attr={attr} constraints={len(state.constraints)}",
         )
 
+    @classmethod
+    def _is_compatible_with_override(
+        cls,
+        existing: Constraint,
+        replacements: list[Constraint],
+    ) -> bool:
+        """Return whether an existing structured constraint survives an override."""
+        same_type = [
+            replacement
+            for replacement in replacements
+            if replacement.attribute_type == existing.attribute_type
+        ]
+        if not same_type:
+            # The override addresses a different attribute, so this remains
+            # useful, compatible intent context.
+            return True
+        # Generic feature statements frequently describe complementary target
+        # details rather than mutually exclusive choices. Retain them when a
+        # later override supplies another feature, while keeping the stricter
+        # compatibility check for material, color, budget, and other typed
+        # requirements.
+        if existing.attribute_type == "feature":
+            return True
+        return any(cls._values_are_compatible(existing.value, replacement.value) for replacement in same_type)
+
+    @classmethod
+    def _values_are_compatible(cls, existing_value: str, replacement_value: str) -> bool:
+        existing = cls._normalize_value(existing_value)
+        replacement = cls._normalize_value(replacement_value)
+        if not existing or not replacement:
+            # Do not discard an otherwise useful parsed constraint because an
+            # incoming value was unexpectedly empty.
+            return True
+        if existing in replacement or replacement in existing:
+            return True
+        return bool(cls._value_tokens(existing) & cls._value_tokens(replacement))
+
+    @staticmethod
+    def _normalize_value(value: str) -> str:
+        return " ".join(value.lower().split())
+
+    @classmethod
+    def _value_tokens(cls, value: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", value.lower())
+            if token not in cls._NON_VALUE_WORDS
+        }
+
     def _pick_attribute(self, state: SessionState, turn: int) -> Optional[str]:
+        if turn <= BROAD_DISCOVERY_TURNS:
+            return "other"
+
         known_types = {c.attribute_type for c in state.constraints}
         blocked = state.exhausted_attributes | known_types
 
