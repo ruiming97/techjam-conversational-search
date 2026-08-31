@@ -45,6 +45,18 @@ class StateModule:
             state.exhausted_attributes -= {
                 c.attribute_type for c in nlu_result.new_constraints
             }
+            # A customer may reverse an earlier rejection ("actually, red is
+            # fine").  A new positive value supersedes an equivalent stored
+            # exclusion for the same attribute.
+            state.negative_constraints = [
+                existing
+                for existing in state.negative_constraints
+                if not any(
+                    existing.attribute_type == replacement.attribute_type
+                    and self._values_are_compatible(existing.value, replacement.value)
+                    for replacement in nlu_result.new_constraints
+                )
+            ]
 
         if nlu_result.is_no_preference:
             state.boundary_detected = True
@@ -59,6 +71,20 @@ class StateModule:
         for c in nlu_result.new_constraints:
             if not any(ex.raw_text == c.raw_text for ex in state.constraints):
                 state.constraints.append(c)
+
+        for c in nlu_result.negative_constraints:
+            # An explicit rejection supersedes a previously stored matching
+            # positive value, so stale intent cannot leak back into search.
+            state.constraints = [
+                existing
+                for existing in state.constraints
+                if not (
+                    existing.attribute_type == c.attribute_type
+                    and self._values_are_compatible(existing.value, c.value)
+                )
+            ]
+            if not any(ex.raw_text == c.raw_text for ex in state.negative_constraints):
+                state.negative_constraints.append(c)
 
         state.messages.append({"role": "user", "text": user_message, "turn": turn})
 

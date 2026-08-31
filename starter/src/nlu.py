@@ -108,7 +108,7 @@ _GENERIC_NEED_RE = re.compile(
 # customer explicitly doesn't want, which is worse than extracting nothing.
 _NEGATION_CUE_RE = re.compile(
     r"\b(?:dealbreaker|hate|dislike|avoid|allerg\w*|stay away from|"
-    r"can'?t stand|don'?t want|not a fan of)\b",
+    r"without|can'?t stand|don'?t want|not a fan of|no)\b",
     re.I,
 )
 _NEGATION_PROXIMITY_CHARS = 40
@@ -209,6 +209,39 @@ def _fallback_extract_constraints(message: str, turn: int) -> list[Constraint]:
     return constraints
 
 
+def _fallback_extract_negative_constraints(message: str, turn: int) -> list[Constraint]:
+    """Extract explicitly rejected catalog attributes as exclusion signals.
+
+    A negative preference should not be added to the positive query (where it
+    would promote precisely the products the customer rejected).  Keeping it
+    separately lets retrieval demote matching candidates while preserving the
+    normal full-text recall path.
+    """
+    negation_spans = [m.span() for m in _NEGATION_CUE_RE.finditer(message)]
+    if not negation_spans:
+        return []
+
+    def is_negated(span: tuple[int, int]) -> bool:
+        start, end = span
+        return any(
+            start - neg_end < _NEGATION_PROXIMITY_CHARS
+            and neg_start - end < _NEGATION_PROXIMITY_CHARS
+            for neg_start, neg_end in negation_spans
+        )
+
+    constraints: list[Constraint] = []
+    seen: set[str] = set()
+    for pattern in (MATERIAL_RE, COLOR_RE, _SIZE_WORDS_RE, _STYLE_WORDS_RE, _USE_CASE_WORDS_RE):
+        for match in pattern.finditer(message):
+            if not is_negated(match.span()):
+                continue
+            raw = match.group(0).strip().rstrip(".,;")
+            if raw and raw.lower() not in seen:
+                seen.add(raw.lower())
+                constraints.append(_make_constraint(raw, turn))
+    return constraints
+
+
 # ---------------------------------------------------------------------------
 # Tier 3 (optional): live LLM-based parse.
 #
@@ -234,6 +267,7 @@ def _llm_extract(user_message: str, turn: int, state: SessionState) -> Optional[
         "no markdown fences) matching exactly this schema:\n"
         '{"constraints": [{"raw_text": string, "attribute_type": string (one of '
         f"{schema_attrs}), \"value\": string}}], "
+        '"negative_constraints": [{"raw_text": string, "attribute_type": string, "value": string}], '
         '"intent": string (one of ["buying", "browsing", "override", "unknown"]), '
         '"is_override": boolean, "is_no_preference": boolean, "is_exhausted": boolean, '
         '"exhausted_attribute": string or null, "category_text": string}\n\n'
@@ -270,23 +304,32 @@ def _llm_extract(user_message: str, turn: int, state: SessionState) -> Optional[
         return None
 
     try:
-        constraints: list[Constraint] = []
-        for item in parsed.get("constraints") or []:
-            raw = str(item.get("raw_text", "")).strip()
-            if not raw:
-                continue
-            attr = str(item.get("attribute_type", "")).strip().lower()
-            if attr not in ALLOWED_ATTRIBUTES:
-                attr = classify_constraint(raw)
-            value = str(item.get("value") or raw).strip()
-            constraints.append(
-                Constraint(
-                    raw_text=raw,
-                    attribute_type=attr,
-                    value=normalize_value(value, attr),
-                    turn_received=turn,
+        def parse_constraints(items: object) -> list[Constraint]:
+            constraints: list[Constraint] = []
+            if not isinstance(items, list):
+                return constraints
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                raw = str(item.get("raw_text", "")).strip()
+                if not raw:
+                    continue
+                attr = str(item.get("attribute_type", "")).strip().lower()
+                if attr not in ALLOWED_ATTRIBUTES:
+                    attr = classify_constraint(raw)
+                value = str(item.get("value") or raw).strip()
+                constraints.append(
+                    Constraint(
+                        raw_text=raw,
+                        attribute_type=attr,
+                        value=normalize_value(value, attr),
+                        turn_received=turn,
+                    )
                 )
-            )
+            return constraints
+
+        constraints = parse_constraints(parsed.get("constraints"))
+        negative_constraints = parse_constraints(parsed.get("negative_constraints"))
 
         intent = str(parsed.get("intent", "unknown")).strip().lower()
         if intent not in ("buying", "browsing", "override", "unknown"):
@@ -305,6 +348,7 @@ def _llm_extract(user_message: str, turn: int, state: SessionState) -> Optional[
 
         return NLUResult(
             new_constraints=constraints,
+            negative_constraints=negative_constraints,
             detected_intent=intent,
             is_override=bool(parsed.get("is_override", False)),
             is_no_preference=bool(parsed.get("is_no_preference", False)),
@@ -331,6 +375,7 @@ class NLUModule:
 
     def _heuristic_parse(self, user_message: str, turn: int, state: SessionState) -> NLUResult:
         constraints: list[Constraint] = []
+        negative_constraints = _fallback_extract_negative_constraints(user_message, turn)
         is_override = False
         is_no_preference = False
         is_exhausted = False
@@ -434,6 +479,22 @@ class NLUModule:
                     used_fallback = True
                     constraints.extend(fallback_constraints)
 
+        if negative_constraints:
+            # Strict disclosure patterns may include a phrase such as "avoid
+            # leather".  Remove its overlapping positive parse so rejected
+            # values never become positive retrieval evidence.
+            constraints = [
+                constraint for constraint in constraints
+                if not any(
+                    constraint.attribute_type == negative.attribute_type
+                    and (
+                        negative.value in constraint.value
+                        or constraint.value in negative.value
+                    )
+                    for negative in negative_constraints
+                )
+            ]
+
         lowered_msg = user_message.lower()
         intent = "unknown"
         if turn == 1:
@@ -453,6 +514,7 @@ class NLUModule:
 
         return NLUResult(
             new_constraints=constraints,
+            negative_constraints=negative_constraints,
             detected_intent=intent,
             is_override=is_override,
             is_no_preference=is_no_preference,

@@ -38,6 +38,7 @@ class CatalogIndex:
     def __init__(self, catalog_path: str | Path) -> None:
         self.catalog_path = Path(catalog_path)
         self.asin_set: set[str] = set()
+        self.prices: dict[str, float] = {}
         self.connection = sqlite3.connect(":memory:")
         self._clause_cache: dict[
             tuple[tuple[str, ...], int, str], tuple[tuple[tuple[str, float], ...], frozenset[str]]
@@ -58,6 +59,10 @@ class CatalogIndex:
                 product = json.loads(line)
                 asin = str(product["parent_asin"])
                 self.asin_set.add(asin)
+                try:
+                    self.prices[asin] = float(product.get("price"))
+                except (TypeError, ValueError):
+                    pass
                 batch.append((
                     asin,
                     _text(product.get("title")),
@@ -76,6 +81,19 @@ class CatalogIndex:
 
     def is_valid(self, asin: str) -> bool:
         return asin in self.asin_set
+
+    def nearest_price_matches(self, target: float, limit: int = 100) -> list[tuple[str, float]]:
+        """Return catalog items nearest to a disclosed target price.
+
+        Price is deliberately kept outside FTS: numeric terms are poor full-text
+        retrieval signals, but an explicitly disclosed budget is useful
+        structured evidence.  The catalog is small enough that this in-memory
+        ordering is both simple and deterministic.
+        """
+        return sorted(
+            self.prices.items(),
+            key=lambda item: (abs(item[1] - target), item[0]),
+        )[:limit]
 
     def bm25_search(self, query_terms: list[str], limit: int = 50) -> list[tuple[str, float]]:
         unique = list(dict.fromkeys(query_terms))[:60]
