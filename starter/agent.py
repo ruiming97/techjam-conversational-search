@@ -63,7 +63,7 @@ class Agent:
         )
 
         response = {
-            "message": decision.message_template,
+            "message": self._nlu.phrase(decision, state, len(retrieval.ranked_asins)),
             "ask_attribute": decision.ask_attribute,
             "recommendations": [{"parent_asin": a} for a in retrieval.ranked_asins],
             "usage": {
