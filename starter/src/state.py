@@ -17,8 +17,17 @@ class StateModule:
         if nlu_result.is_override:
             state.override_detected = True
             overridden_types = {c.attribute_type for c in nlu_result.new_constraints}
+            new_values_lower = [c.value.lower() for c in nlu_result.new_constraints if c.value]
+
+            def _conflicts(existing_value: str) -> bool:
+                existing_lower = existing_value.lower()
+                return not any(
+                    nv in existing_lower or existing_lower in nv for nv in new_values_lower
+                )
+
             state.constraints = [
-                c for c in state.constraints if c.attribute_type not in overridden_types
+                c for c in state.constraints
+                if c.attribute_type not in overridden_types or not _conflicts(c.value)
             ]
             state.exhausted_attributes -= overridden_types
 

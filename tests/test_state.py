@@ -60,6 +60,36 @@ class StateModuleTest(unittest.TestCase):
         material_values = [c.value for c in state.constraints if c.attribute_type == "material"]
         self.assertEqual(material_values, ["leather"])
 
+    def test_override_keeps_same_type_constraint_that_is_not_a_real_conflict(self) -> None:
+        # An "override" whose new value is just a shorter/more specific
+        # restatement of an already-known same-type constraint (e.g. the
+        # user re-emphasizes "cotton" after already having said "90% Cotton,
+        # 10% Others") is not an actual contradiction, and wiping the whole
+        # attribute type throws away useful detail for no reason. Only drop
+        # existing same-type constraints whose value doesn't overlap with
+        # the new one.
+        state = make_state()
+        state.constraints.append(
+            Constraint(
+                raw_text="90% Cotton, 10% Others",
+                attribute_type="material",
+                value="90% Cotton, 10% Others",
+                turn_received=1,
+            )
+        )
+        mod = StateModule()
+        override_nlu = make_nlu(
+            is_override=True,
+            new_constraints=[
+                Constraint(raw_text="cotton", attribute_type="material", value="cotton", turn_received=3)
+            ],
+        )
+        mod.decide(state, 3, override_nlu, "ignore my earlier preference, What I need is: cotton.")
+
+        material_values = {c.value for c in state.constraints if c.attribute_type == "material"}
+        self.assertIn("90% Cotton, 10% Others", material_values)
+        self.assertIn("cotton", material_values)
+
     def test_boundary_decline_is_remembered_and_never_asked_again(self) -> None:
         state = make_state()
         mod = StateModule()
