@@ -11,18 +11,23 @@ from starter.src.interfaces import (
 )
 
 
-_MAX_ASK_TURN = 7
-_MAX_ASK_COUNT = 3
-
-
 class StateModule:
 
     def decide(self, state: SessionState, turn: int, nlu_result: NLUResult, user_message: str = "") -> StrategyDecision:
         if nlu_result.is_override:
             state.override_detected = True
             overridden_types = {c.attribute_type for c in nlu_result.new_constraints}
+            new_values_lower = [c.value.lower() for c in nlu_result.new_constraints if c.value]
+
+            def _conflicts(existing_value: str) -> bool:
+                existing_lower = existing_value.lower()
+                return not any(
+                    nv in existing_lower or existing_lower in nv for nv in new_values_lower
+                )
+
             state.constraints = [
-                c for c in state.constraints if c.attribute_type not in overridden_types
+                c for c in state.constraints
+                if c.attribute_type not in overridden_types or not _conflicts(c.value)
             ]
             state.exhausted_attributes -= overridden_types
 
@@ -64,10 +69,6 @@ class StateModule:
         )
 
     def _pick_attribute(self, state: SessionState, turn: int) -> Optional[str]:
-        asked_count = sum(1 for a in state.attributes_asked if a is not None)
-        if turn > _MAX_ASK_TURN or asked_count >= _MAX_ASK_COUNT:
-            return None
-
         known_types = {c.attribute_type for c in state.constraints}
         blocked = state.exhausted_attributes | known_types
 
