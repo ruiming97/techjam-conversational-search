@@ -5,6 +5,8 @@ import re
 import sqlite3
 from pathlib import Path
 
+from starter.src.config import BM25_WEIGHTS
+
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
@@ -79,10 +81,11 @@ class CatalogIndex:
     def bm25_search_raw(self, expression: str, limit: int = 50) -> list[tuple[str, float]]:
         if not expression:
             return []
+        weights = ", ".join(str(w) for w in BM25_WEIGHTS)
         rows = self.connection.execute(
-            "SELECT parent_asin, bm25(products, 0.0, 6.0, 4.0, 2.5, 2.5, 1.5, 1.0) "
-            "FROM products WHERE products MATCH ? "
-            "ORDER BY bm25(products, 0.0, 6.0, 4.0, 2.5, 2.5, 1.5, 1.0) LIMIT ?",
+            f"SELECT parent_asin, bm25(products, {weights}) "
+            f"FROM products WHERE products MATCH ? "
+            f"ORDER BY bm25(products, {weights}) LIMIT ?",
             (expression, limit),
         ).fetchall()
         return [(str(r[0]), float(r[1])) for r in rows]
