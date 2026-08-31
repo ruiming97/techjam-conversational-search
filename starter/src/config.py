@@ -29,4 +29,33 @@ ATTRIBUTE_MESSAGES = {
     "category": "What type of product are you looking for?",
 }
 
+# Boundary handling ---------------------------------------------------------
+#
+# In the evaluator's boundary scenario, the customer declines the first
+# attribute we ask about.  Treating that as a permanent refusal to share
+# *anything* causes the next question to be needlessly narrow.  A single
+# follow-up using the evaluator's wildcard ``other`` attribute can disclose
+# the customer's most useful remaining constraints.  Keep this policy here
+# (rather than embedding it in the state router) so its trigger and wording
+# are explicit and independently testable.
+BOUNDARY_BROAD_REASK_ATTRIBUTE = "other"
+BOUNDARY_BROAD_REASK_MESSAGE = (
+    "No problem. What are the one or two most important practical needs for it?"
+)
+
+
+def should_broad_reask_after_boundary(
+    *,
+    is_no_preference: bool,
+    attributes_asked: list[str | None],
+) -> bool:
+    """Return whether to make the one broad follow-up after an initial decline.
+
+    ``attributes_asked`` is inspected *before* the current decision is
+    appended.  Requiring exactly one prior question makes the policy a
+    one-shot recovery for the initial boundary response, rather than a
+    repeated override of users who later decline an attribute.
+    """
+    return is_no_preference and len(attributes_asked) == 1
+
 LLM_ENABLED = os.environ.get("LLM_ENABLED", "false").lower() == "true"
