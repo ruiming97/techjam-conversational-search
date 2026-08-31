@@ -24,6 +24,7 @@ class SessionState:
     session_id: str
     user_profile: dict
     constraints: list[Constraint] = field(default_factory=list)
+    negative_constraints: list[Constraint] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
     category_text: str = ""
     scenario_guess: str = "unknown"
@@ -45,6 +46,7 @@ class RetrievalResult:
 @dataclass
 class NLUResult:
     new_constraints: list[Constraint]
+    negative_constraints: list[Constraint] = field(default_factory=list)
     detected_intent: str = "unknown"
     is_override: bool = False
     is_no_preference: bool = False

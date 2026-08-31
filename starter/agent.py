@@ -55,7 +55,12 @@ class Agent:
         nlu_result = self._nlu.parse(user_message, turn, state)
         decision = self._state_mod.decide(state, turn, nlu_result, user_message)
         query_text = self._build_query(state, nlu_result.category_text)
-        retrieval = self._retrieval.search(query_text, state.constraints, top_k=50)
+        retrieval = self._retrieval.search(
+            query_text,
+            state.constraints,
+            top_k=50,
+            negative_constraints=state.negative_constraints,
+        )
 
         response = {
             "message": decision.message_template,
