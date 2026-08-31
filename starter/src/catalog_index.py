@@ -42,6 +42,7 @@ class CatalogIndex:
         self._clause_cache: dict[
             tuple[tuple[str, ...], int, str], tuple[tuple[tuple[str, float], ...], frozenset[str]]
         ] = {}
+        self._clause_document_frequency_cache: dict[tuple[str, ...], int] = {}
         self._build()
 
     def _build(self) -> None:
@@ -144,3 +145,18 @@ class CatalogIndex:
             }
         self._clause_cache[cache_key] = (tuple(complete), frozenset(phrase_asins))
         return complete, phrase_asins
+
+    def clause_document_frequency(self, terms: list[str]) -> int:
+        """Return the catalog frequency of a complete constraint clause."""
+        unique = tuple(dict.fromkeys(terms))[:24]
+        if not unique:
+            return 0
+        cached = self._clause_document_frequency_cache.get(unique)
+        if cached is not None:
+            return cached
+        conjunction = " AND ".join(f'"{term}"' for term in unique)
+        count = int(self.connection.execute(
+            "SELECT count(*) FROM products WHERE products MATCH ?", (conjunction,)
+        ).fetchone()[0])
+        self._clause_document_frequency_cache[unique] = count
+        return count

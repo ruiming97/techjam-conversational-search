@@ -90,6 +90,36 @@ class StateModuleTest(unittest.TestCase):
         self.assertIn("90% Cotton, 10% Others", material_values)
         self.assertIn("cotton", material_values)
 
+    def test_override_keeps_complementary_generic_feature_constraints(self) -> None:
+        state = make_state()
+        state.constraints.append(
+            Constraint(
+                raw_text="lightweight construction",
+                attribute_type="feature",
+                value="lightweight construction",
+                turn_received=1,
+            )
+        )
+        mod = StateModule()
+        override_nlu = make_nlu(
+            is_override=True,
+            new_constraints=[
+                Constraint(
+                    raw_text="adjustable strap",
+                    attribute_type="feature",
+                    value="adjustable strap",
+                    turn_received=3,
+                )
+            ],
+        )
+
+        mod.decide(state, 3, override_nlu, "Actually, ignore my earlier preference. What I need is: adjustable strap.")
+
+        self.assertEqual(
+            [constraint.value for constraint in state.constraints],
+            ["lightweight construction", "adjustable strap"],
+        )
+
     def test_override_keeps_stable_structured_context_and_discards_stale_transcript(self) -> None:
         state = make_state()
         state.category_text = "women's running shoes"
@@ -133,7 +163,7 @@ class StateModuleTest(unittest.TestCase):
 
         self.assertEqual([c.value for c in state.constraints], ["color: black", "black color"])
 
-    def test_boundary_decline_is_remembered_and_never_asked_again(self) -> None:
+    def test_boundary_decline_is_remembered_after_broad_discovery(self) -> None:
         state = make_state()
         mod = StateModule()
         decision1 = mod.decide(state, 1, make_nlu(), "I'm looking for shoes")
@@ -147,7 +177,10 @@ class StateModuleTest(unittest.TestCase):
         )
         self.assertIn(declined_attr, state.exhausted_attributes)
 
-        for turn in range(3, 8):
+        # The opening discovery window intentionally permits broad ``other``
+        # questions through turn three.  Afterwards, a declined attribute is
+        # never selected by the normal attribute router.
+        for turn in range(4, 8):
             decision = mod.decide(state, turn, make_nlu(), "ok")
             self.assertNotEqual(decision.ask_attribute, declined_attr)
 

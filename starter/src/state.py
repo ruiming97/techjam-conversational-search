@@ -6,6 +6,7 @@ from typing import Optional
 from starter.src.config import (
     ASK_STRATEGY_ORDER,
     ATTRIBUTE_MESSAGES,
+    BROAD_DISCOVERY_TURNS,
     BOUNDARY_BROAD_REASK_ATTRIBUTE,
     BOUNDARY_BROAD_REASK_MESSAGE,
     should_broad_reask_after_boundary,
@@ -104,6 +105,13 @@ class StateModule:
             # The override addresses a different attribute, so this remains
             # useful, compatible intent context.
             return True
+        # Generic feature statements frequently describe complementary target
+        # details rather than mutually exclusive choices. Retain them when a
+        # later override supplies another feature, while keeping the stricter
+        # compatibility check for material, color, budget, and other typed
+        # requirements.
+        if existing.attribute_type == "feature":
+            return True
         return any(cls._values_are_compatible(existing.value, replacement.value) for replacement in same_type)
 
     @classmethod
@@ -131,6 +139,9 @@ class StateModule:
         }
 
     def _pick_attribute(self, state: SessionState, turn: int) -> Optional[str]:
+        if turn <= BROAD_DISCOVERY_TURNS:
+            return "other"
+
         known_types = {c.attribute_type for c in state.constraints}
         blocked = state.exhausted_attributes | known_types
 

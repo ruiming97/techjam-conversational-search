@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from starter.src.catalog_index import CatalogIndex, tokenize
 from starter.src.interfaces import Constraint, RetrievalResult
 
@@ -40,7 +42,19 @@ class RetrievalModule:
             limit=max(top_k * _FALLBACK_CANDIDATE_MULTIPLIER, top_k),
         )
 
-        # asin -> [completed clause count, exact phrase count, BM25 evidence]
+        # Weight a complete clause by its inverse catalog frequency. A rare,
+        # specific product detail is stronger evidence than a common term
+        # such as "black". The +1 keeps common clauses useful.
+        clause_weights = [
+            1.0 + math.log(
+                (len(self._catalog.asin_set) + 1)
+                / (self._catalog.clause_document_frequency(clause) + 1)
+            )
+            for clause, _raw in clauses
+        ]
+        total_clause_weight = sum(clause_weights)
+
+        # asin -> [completed clause weight, exact phrase count, BM25 evidence]
         evidence: dict[str, list[float]] = {}
         for rank, (asin, raw_score) in enumerate(fallback):
             # SQLite's bm25 is negative and lower is better.  A small
@@ -48,7 +62,7 @@ class RetrievalModule:
             # different FTS queries.
             evidence[asin] = [0.0, 0.0, 1.0 / (rank + 1)]
 
-        for clause, raw_clause in clauses:
+        for (clause, raw_clause), clause_weight in zip(clauses, clause_weights):
             complete, phrase_asins = self._catalog.clause_search(
                 clause,
                 limit=_CLAUSE_CANDIDATE_LIMIT,
@@ -56,7 +70,7 @@ class RetrievalModule:
             )
             for rank, (asin, _raw_score) in enumerate(complete):
                 values = evidence.setdefault(asin, [0.0, 0.0, 0.0])
-                values[0] += 1.0
+                values[0] += clause_weight
                 values[2] += 1.0 / (rank + 1)
                 if asin in phrase_asins:
                     values[1] += 1.0
@@ -75,7 +89,7 @@ class RetrievalModule:
             )
             for rank, (asin, _raw_score) in enumerate(combined):
                 values = evidence.setdefault(asin, [0.0, 0.0, 0.0])
-                values[0] = float(clause_count)
+                values[0] = total_clause_weight
                 values[2] += 2.0 / (rank + 1)
 
         def score(item: tuple[str, list[float]]) -> tuple[float, float, float, str]:
@@ -84,7 +98,7 @@ class RetrievalModule:
             # implements AND-style preference across multiple statements;
             # phrase evidence then separates feature text from coincidental
             # bag-of-words matches, and BM25 only resolves remaining ties.
-            coverage = complete_count / clause_count if clause_count else 0.0
+            coverage = complete_count / total_clause_weight if total_clause_weight else 0.0
             return (coverage, phrase_count, bm25_evidence, asin)
 
         ranked = sorted(evidence.items(), key=score, reverse=True)[:top_k]

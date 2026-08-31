@@ -16,6 +16,13 @@ ASK_STRATEGY_ORDER = [
     "feature", "material", "color", "style", "other",
 ]
 
+# Broad discovery questions are especially information-dense in the supplied
+# conversation simulator: ``other`` may reveal constraints across attribute
+# types.  Keep the opening exploration deliberately broad, then fall back to
+# the normal attribute rotation once enough preference detail has been
+# collected.
+BROAD_DISCOVERY_TURNS = 3
+
 ATTRIBUTE_MESSAGES = {
     "other": "What specific features or requirements matter most to you?",
     "feature": "Are there particular features you need?",
