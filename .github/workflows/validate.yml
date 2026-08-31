@@ -1,0 +1,35 @@
+name: Validate agent
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run unit tests
+        run: python -m unittest discover -v
+
+      - name: Run public-set evaluator
+        run: python -m evaluator.local_evaluator
+
+      - name: Upload evaluator results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluator-results
+          path: results.json
