@@ -9,7 +9,7 @@ COLORS = ("black", "white", "blue", "red", "pink", "green", "brown", "gray", "gr
 MATERIAL_RE = re.compile(r"\b(?:" + "|".join(MATERIALS) + r")\b", re.I)
 COLOR_RE = re.compile(r"\b(?:" + "|".join(COLORS) + r")\b", re.I)
 
-BM25_WEIGHTS = (0.0, 6.0, 4.0, 2.5, 2.5, 1.5, 1.0)
+BM25_WEIGHTS = (0.0, 6.0, 4.0, 4.0, 3.5, 1.5, 0.3)
 
 ASK_STRATEGY_ORDER = [
     "other", "other", "feature", "material", "other",
