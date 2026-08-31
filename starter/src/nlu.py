@@ -43,11 +43,20 @@ _WASTED_RE = re.compile(r"Ask me about one specific attribute", re.I)
 # ---------------------------------------------------------------------------
 _OVERRIDE_CUE_RE = re.compile(
     r"\b(?:actually|on second thought|change(?:d)? my mind|forget (?:what|that)|"
-    r"ignore (?:that|what|my earlier)|scratch that|never ?mind that)\b",
+    r"ignore (?:that|what|my earlier)|scratch that|never ?mind)\b",
     re.I,
 )
 _OVERRIDE_TARGET_RE = re.compile(
     r"(?:what I (?:really )?need is|now I want|I(?:'d| would)? (?:actually )?(?:want|need|like)|instead[:,]?)\s*(.+?)(?:\.|$)",
+    re.I,
+)
+# Covers the mirror-image phrasing where the replacement value comes BEFORE
+# the word "instead" ("give me canvas instead") rather than after it
+# ("instead: canvas") -- both orderings are natural English, and
+# _OVERRIDE_TARGET_RE alone only handles the latter.
+_OVERRIDE_TARGET_TRAILING_RE = re.compile(
+    r"(?:give me|get me|make it|switch (?:it )?to|how about|let'?s (?:go|try) with|"
+    r"I'll (?:take|go with))\s+(.+?)\s+instead\b",
     re.I,
 )
 _NO_PREFERENCE_RE = re.compile(
@@ -57,7 +66,7 @@ _NO_PREFERENCE_RE = re.compile(
     re.I,
 )
 _NOTHING_ELSE_RE = re.compile(
-    r"\b(?:nothing else|that'?s (?:it|all)|no more (?:preferences|requirements)?|"
+    r"\b(?:nothing else|that'?s (?:it|all)|no more (?:preferences|requirements)|"
     r"nothing more|no additional (?:preference|requirement)s?|"
     r"can'?t think of anything else)\b",
     re.I,
@@ -92,6 +101,17 @@ _GENERIC_NEED_RE = re.compile(
     r"(.+?)(?:\.|,|$)",
     re.I,
 )
+# A keyword match near one of these cues is being REJECTED, not requested
+# ("wool is a dealbreaker", "I hate leather", "no polyester please") -- the
+# fallback scan below must not assert it as a positive constraint, since a
+# wrong-direction constraint actively biases retrieval toward what the
+# customer explicitly doesn't want, which is worse than extracting nothing.
+_NEGATION_CUE_RE = re.compile(
+    r"\b(?:dealbreaker|hate|dislike|avoid|allerg\w*|stay away from|"
+    r"can'?t stand|don'?t want|not a fan of)\b",
+    re.I,
+)
+_NEGATION_PROXIMITY_CHARS = 40
 
 
 def classify_constraint(value: str) -> str:
@@ -160,6 +180,14 @@ def _fallback_extract_constraints(message: str, turn: int) -> list[Constraint]:
     """
     constraints: list[Constraint] = []
     seen: set[str] = set()
+    negation_spans = [m.span() for m in _NEGATION_CUE_RE.finditer(message)]
+
+    def _is_negated(span: tuple[int, int]) -> bool:
+        start, end = span
+        return any(
+            start - neg_end < _NEGATION_PROXIMITY_CHARS and neg_start - end < _NEGATION_PROXIMITY_CHARS
+            for neg_start, neg_end in negation_spans
+        )
 
     def add(raw: str) -> None:
         raw = raw.strip().rstrip(".,;")
@@ -170,7 +198,7 @@ def _fallback_extract_constraints(message: str, turn: int) -> list[Constraint]:
 
     for pattern in (_BUDGET_RE, MATERIAL_RE, COLOR_RE, _SIZE_WORDS_RE, _STYLE_WORDS_RE, _USE_CASE_WORDS_RE):
         m = pattern.search(message)
-        if m:
+        if m and not _is_negated(m.span()):
             add(m.group(0))
 
     if not constraints:
@@ -316,7 +344,7 @@ class NLUModule:
             raw = override_m.group(1).strip().rstrip(".")
             constraints.append(_make_constraint(raw, turn))
         elif _OVERRIDE_CUE_RE.search(user_message):
-            target_m = _OVERRIDE_TARGET_RE.search(user_message)
+            target_m = _OVERRIDE_TARGET_RE.search(user_message) or _OVERRIDE_TARGET_TRAILING_RE.search(user_message)
             if target_m:
                 raw = target_m.group(1).strip().rstrip(".")
                 if raw:
