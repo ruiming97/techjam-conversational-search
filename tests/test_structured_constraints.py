@@ -83,6 +83,30 @@ class StructuredConstraintTest(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
 
+    def test_override_category_clause_outranks_generic_constraint_match(self) -> None:
+        path = _catalog([
+            {
+                **_product("GENERIC", 20.0, ["100% cotton imported"]),
+                "title": "Cotton casual shirt",
+                "categories": ["Clothing", "Tops"],
+            },
+            {
+                **_product("TARGET", 20.0, ["100% cotton imported"]),
+                "title": "Cotton crew undershirt",
+                "categories": ["Clothing", "Underwear", "Undershirts"],
+            },
+        ])
+        try:
+            result = RetrievalModule(CatalogIndex(path)).search(
+                "cotton",
+                [Constraint("cotton", "material", "cotton", 1)],
+                top_k=2,
+                override_category_text="Underwear Undershirts",
+            )
+            self.assertEqual(result.ranked_asins[0], "TARGET")
+        finally:
+            path.unlink(missing_ok=True)
+
     def test_nlu_preserves_rejected_material_as_negative_constraint(self) -> None:
         state = SessionState(session_id="negative", user_profile={})
         result = NLUModule().parse("I don't want leather or wool.", 2, state)
