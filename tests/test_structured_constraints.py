@@ -36,6 +36,20 @@ def _product(asin: str, price: float, features: list[str]) -> dict:
 
 
 class StructuredConstraintTest(unittest.TestCase):
+    def test_bare_product_phrase_is_parsed_as_initial_category(self) -> None:
+        state = SessionState(session_id="bare-query", user_profile={})
+        result = NLUModule().parse("hiking jacket", 1, state)
+
+        self.assertEqual(result.category_text, "hiking jacket")
+        self.assertIn("hiking", [constraint.value for constraint in result.new_constraints])
+
+    def test_bare_single_attribute_is_not_mistaken_for_category(self) -> None:
+        state = SessionState(session_id="bare-attribute", user_profile={})
+        result = NLUModule().parse("nylon", 1, state)
+
+        self.assertEqual(result.category_text, "")
+        self.assertEqual([constraint.value for constraint in result.new_constraints], ["nylon"])
+
     def test_budget_around_price_promotes_nearest_catalog_item(self) -> None:
         path = _catalog([
             _product("LOW", 24.0, ["durable casual belt"]),

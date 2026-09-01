@@ -89,6 +89,16 @@ _LOOKING_FOR_LOOSE_RE = re.compile(
     r"(?:a |an |some )?(.+?)(?:\.|,|$)",
     re.I,
 )
+# A shopper will often enter a search-style noun phrase rather than a full
+# sentence (for example, "hiking jacket").  Treat only short, plain phrases
+# as categories; complete sentences continue through the normal intent and
+# constraint parsers below.
+_BARE_CATEGORY_RE = re.compile(r"^[a-z0-9][a-z0-9 &'/-]*$", re.I)
+_BARE_CATEGORY_BLOCKLIST = frozenset({
+    "actually", "avoid", "budget", "can", "care", "do", "dont", "forget",
+    "hate", "i", "im", "is", "looking", "need", "no", "not", "please",
+    "prefer", "want", "with", "would", "you",
+})
 _BUDGET_RE = re.compile(
     r"(?:under|below|less than|no more than|max(?:imum)?(?: of)?|up to|around|about)\s*\$?\s*(\d[\d,]*(?:\.\d+)?)"
     r"|\$\s*(\d[\d,]*(?:\.\d+)?)"
@@ -175,6 +185,19 @@ def _make_constraint(raw: str, turn: int) -> Constraint:
         value=normalize_value(raw, attr),
         turn_received=turn,
     )
+
+
+def _bare_category_phrase(message: str) -> str:
+    """Return a likely short search query, otherwise an empty string."""
+    candidate = message.strip().rstrip(".,;:!?")
+    if not _BARE_CATEGORY_RE.fullmatch(candidate):
+        return ""
+    words = re.findall(r"[a-z0-9]+", candidate.lower())
+    if not 2 <= len(words) <= 6:
+        return ""
+    if any(word in _BARE_CATEGORY_BLOCKLIST for word in words):
+        return ""
+    return candidate
 
 
 def _fallback_extract_constraints(message: str, turn: int) -> list[Constraint]:
@@ -547,6 +570,11 @@ class NLUModule:
                 loose_text = loose_m.group(1).strip().rstrip(".,;")
                 if loose_text:
                     category_text = loose_text
+                    used_fallback = True
+            elif turn == 1 and not is_override and not is_no_preference and not is_exhausted:
+                bare_category = _bare_category_phrase(user_message)
+                if bare_category:
+                    category_text = bare_category
                     used_fallback = True
 
         if not is_override:
