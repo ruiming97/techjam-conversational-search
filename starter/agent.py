@@ -62,8 +62,17 @@ class Agent:
             override_category_text=state.category_text if state.override_detected else "",
         )
 
+        displayed_scores = retrieval.scores[:top_k]
+        full_match_count = sum(1 for score in displayed_scores if score >= 0.999)
+
         response = {
-            "message": self._nlu.phrase(decision, state, len(retrieval.ranked_asins)),
+            "message": self._nlu.phrase(
+                decision,
+                state,
+                len(retrieval.ranked_asins),
+                full_match_count=full_match_count,
+                displayed_count=len(displayed_scores),
+            ),
             "ask_attribute": decision.ask_attribute,
             "recommendations": [{"parent_asin": a} for a in retrieval.ranked_asins],
             "usage": {
