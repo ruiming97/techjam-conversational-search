@@ -98,6 +98,48 @@ class PhraseTest(unittest.TestCase):
             self.assertIsInstance(message, str)
             self.assertTrue(message)
 
+    def test_full_match_count_equal_to_displayed_reports_full_match(self) -> None:
+        state = make_state(
+            constraints=[Constraint(raw_text="leather", attribute_type="material", value="leather", turn_received=1)],
+        )
+        decision = make_decision()
+        message = self.nlu.phrase(
+            decision, state, num_recommendations=5, full_match_count=3, displayed_count=3
+        )
+        self.assertIn("matches everything you mentioned", message)
+        self.assertIn(decision.message_template, message)
+
+    def test_partial_match_count_reports_how_many_fully_match(self) -> None:
+        state = make_state(
+            constraints=[Constraint(raw_text="leather", attribute_type="material", value="leather", turn_received=1)],
+        )
+        decision = make_decision()
+        message = self.nlu.phrase(
+            decision, state, num_recommendations=5, full_match_count=2, displayed_count=5
+        )
+        self.assertIn("2 of these match everything you mentioned", message)
+
+    def test_zero_full_matches_reports_closest_match(self) -> None:
+        state = make_state(
+            constraints=[Constraint(raw_text="leather", attribute_type="material", value="leather", turn_received=1)],
+        )
+        decision = make_decision()
+        message = self.nlu.phrase(
+            decision, state, num_recommendations=5, full_match_count=0, displayed_count=5
+        )
+        self.assertIn("closest match", message)
+
+    def test_omitting_match_quality_args_matches_legacy_message(self) -> None:
+        state = make_state(
+            constraints=[Constraint(raw_text="leather", attribute_type="material", value="leather", turn_received=1)],
+        )
+        decision = make_decision()
+        message = self.nlu.phrase(decision, state, num_recommendations=5)
+        self.assertEqual(
+            message,
+            f"Based on leather, here's what I found so far. {decision.message_template}",
+        )
+
     def test_state_constraints_not_mutated(self) -> None:
         constraints = [
             Constraint(raw_text="a", attribute_type="feature", value="a value", turn_received=1),

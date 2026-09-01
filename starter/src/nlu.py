@@ -453,11 +453,33 @@ def _recent_unique_constraint_values(constraints: list[Constraint], limit: int =
     return list(reversed(collected))
 
 
-def _build_explanation(state: SessionState, decision: StrategyDecision, num_recommendations: int) -> str:
+def _match_quality_note(full_match_count: int | None, displayed_count: int | None) -> str:
+    """Describe how well the shown recommendations satisfy every disclosed
+    constraint, using the coverage score `RetrievalModule.search` already
+    computes per candidate. Returns "" when that evidence isn't available,
+    which keeps the caller's default phrasing unchanged.
+    """
+    if full_match_count is None or not displayed_count:
+        return ""
+    if full_match_count >= displayed_count:
+        return "here's what I found that matches everything you mentioned."
+    if full_match_count > 0:
+        return f"{full_match_count} of these match everything you mentioned, and the rest come close."
+    return "here's the closest match I could find, though not everything lined up exactly."
+
+
+def _build_explanation(
+    state: SessionState,
+    decision: StrategyDecision,
+    num_recommendations: int,
+    full_match_count: int | None = None,
+    displayed_count: int | None = None,
+) -> str:
     if num_recommendations > 0 and state.constraints and decision.ask_attribute is not None:
         values = _recent_unique_constraint_values(state.constraints, limit=3)
         if values:
-            return f"Based on {_join_natural(values)}, here's what I found so far."
+            note = _match_quality_note(full_match_count, displayed_count) or "here's what I found so far."
+            return f"Based on {_join_natural(values)}, {note}"
 
     if decision.message_template == BOUNDARY_BROAD_REASK_MESSAGE:
         # The apology-recovery line already sets its own tone -- don't stack
@@ -484,9 +506,18 @@ def _build_explanation(state: SessionState, decision: StrategyDecision, num_reco
 
 class NLUModule:
 
-    def phrase(self, decision: StrategyDecision, state: SessionState, num_recommendations: int) -> str:
+    def phrase(
+        self,
+        decision: StrategyDecision,
+        state: SessionState,
+        num_recommendations: int,
+        full_match_count: int | None = None,
+        displayed_count: int | None = None,
+    ) -> str:
         try:
-            explanation = _build_explanation(state, decision, num_recommendations)
+            explanation = _build_explanation(
+                state, decision, num_recommendations, full_match_count, displayed_count
+            )
         except Exception:
             return decision.message_template
         if explanation:

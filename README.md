@@ -96,6 +96,8 @@ Agent: "What matters most to you?" + [10 recommendations]
 
 **5. No LLM, no embeddings, no dependencies.** The entire agent runs on Python's standard library. SQLite FTS5 handles full-text search. This makes the system reproducible from a clean checkout in under 5 seconds, resilient to network outages, and suitable for offline evaluation.
 
+**6. Explanations reflect real match quality.** The message tells the customer how many of the recommendations actually satisfy everything they've disclosed, using the same coverage score retrieval already computes. *"Based on leather, here's what I found that matches everything you mentioned"* changes to *"...here's the closest match I could find"* when nothing fully lines up.
+
 ## Setup and Reproduction
 
 Python 3.10+ required. No `pip install` needed.
@@ -121,6 +123,7 @@ python3 -m scripts.analyze_results
 - **No semantic reranking**: A cross-encoder over the BM25 top-50 could promote borderline candidates, improving MRR on sessions where the target sits at rank 8-10.
 - **Profile underutilized**: User preference tags (comfort, fit, durability) serve as a first-turn fallback but don't boost retrieval weights.
 - **Evaluator-tuned**: The strict NLU tier is built against the evaluator's templates. The paraphrase fallback adds robustness but hasn't been validated against real human shoppers.
+- **Explanations are set level, not per product**: the message reports overall match quality for the shown recommendations, not why any single product was picked over another.
 
 ## Tools and Resources
 
