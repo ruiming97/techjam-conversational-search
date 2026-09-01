@@ -62,5 +62,35 @@ class CatalogIndexBm25WeightTest(unittest.TestCase):
         self.assertGreater(BM25_WEIGHTS[1], BM25_WEIGHTS[6])  # title > description
 
 
+class CatalogIndexPopularityTest(unittest.TestCase):
+    def test_popularity_increases_with_rating_count(self) -> None:
+        path = _write_catalog([
+            {"parent_asin": "FEW", "title": "widget", "features": [], "details": {},
+             "store": "Acme", "description": [], "rating_number": 5},
+            {"parent_asin": "MANY", "title": "widget", "features": [], "details": {},
+             "store": "Acme", "description": [], "rating_number": 5000},
+        ])
+        try:
+            index = CatalogIndex(path)
+            self.assertGreater(index.popularity("MANY"), index.popularity("FEW"))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_popularity_defaults_to_zero_when_missing_or_invalid(self) -> None:
+        path = _write_catalog([
+            {"parent_asin": "NO_FIELD", "title": "widget", "features": [], "details": {},
+             "store": "Acme", "description": []},
+            {"parent_asin": "NULL_FIELD", "title": "widget", "features": [], "details": {},
+             "store": "Acme", "description": [], "rating_number": None},
+        ])
+        try:
+            index = CatalogIndex(path)
+            self.assertEqual(index.popularity("NO_FIELD"), 0.0)
+            self.assertEqual(index.popularity("NULL_FIELD"), 0.0)
+            self.assertEqual(index.popularity("UNKNOWN_ASIN"), 0.0)
+        finally:
+            path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()
