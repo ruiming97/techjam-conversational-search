@@ -1,6 +1,6 @@
 # Ten-Turn Shopper
 
-A conversational shopping agent that finds a customer's target product from 50,000 items in under 4 turns — without an LLM.
+A conversational shopping agent that finds a customer's target product from 50,000 items in an average of 2.4 turns — without an LLM.
 
 ## The Problem
 
@@ -33,19 +33,19 @@ Instead of 10 turns of guessing, 3 turns of listening.
 
 | Metric | Weak Baseline | Our Agent | Improvement |
 |---|---|---|---|
-| HitRate@10 | 12.5% | **93.0%** | 7.4x |
-| MRR | 0.068 | **0.675** | 9.9x |
-| Mean Turns to Find | 9.81 | **3.01** | 69% faster |
-| TechnicalScore | 0.107 | **0.827** | 7.7x |
+| HitRate@10 | 12.5% | **97.5%** | 7.8x |
+| MRR | 0.068 | **0.711** | 10.4x |
+| Mean Turns to Find | 9.81 | **2.35** | 76% faster |
+| TechnicalScore | 0.107 | **0.874** | 8.2x |
 
 | Scenario | Hit Rate | Avg Turn |
 |---|---|---|
-| Buying (40%) — hard constraint upfront | 90% | 2.8 |
-| Browsing (40%) — starts vague | 96% | 2.6 |
-| Intent Override (15%) — changes mind mid-conversation | 90% | 4.5 |
-| Boundary (5%) — has no opinion on asked attribute | 100% | 3.4 |
+| Buying (40%) — hard constraint upfront | 96% | 1.7 |
+| Browsing (40%) — starts vague | 97.5% | 2.4 |
+| Intent Override (15%) — changes mind mid-conversation | 100% | 3.7 |
+| Boundary (5%) — has no opinion on asked attribute | 100% | 3.3 |
 
-93% of successful matches land at **rank 1**. 62% of all sessions resolve by **turn 2**.
+60% of successful matches land at **rank 1**. 69% of all sessions resolve by **turn 2**.
 
 ## How It Works
 
@@ -76,13 +76,13 @@ Agent: "What matters most to you?" + [10 recommendations]
 
 ### The Pipeline
 
-**NLU** (`src/nlu.py`) — Two-tier constraint parser. Strict regex patterns match the evaluator's exact customer templates with 100% accuracy. A second tier of paraphrase-tolerant patterns (override cues, negation detection, generic need expressions) handles potential variation in the private evaluation set.
+**NLU** (`starter/src/nlu.py`) — Two-tier constraint parser. Strict regex patterns match the evaluator's exact customer templates with 100% accuracy. A second tier of paraphrase-tolerant patterns (override cues, negation detection, generic need expressions) handles potential variation in the private evaluation set. An optional third tier can delegate parsing to Claude when `LLM_ENABLED=true` and an API key is present — it's off by default, so the graded results come entirely from the two heuristic tiers.
 
-**State** (`src/state.py`) — Conversation state machine. Front-loads open-ended discovery in early turns, tracks which attributes have been asked and exhausted, handles intent overrides by preserving compatible constraints while discarding contradicted ones.
+**State** (`starter/src/state.py`) — Conversation state machine. Front-loads open-ended discovery in early turns, tracks which attributes have been asked and exhausted, handles intent overrides by preserving compatible constraints while discarding contradicted ones.
 
-**Retrieval** (`src/retrieval.py`) — Clause-aware BM25. Each customer constraint is treated as an independent search clause weighted by inverse document frequency. A product matching a rare, specific feature like "Triple Moon Pentagram" scores higher than one matching a common term like "cotton". Products are ranked by total clause coverage — those satisfying all constraints outrank partial matches.
+**Retrieval** (`starter/src/retrieval.py`) — Clause-aware BM25. Each customer constraint is treated as an independent search clause weighted by inverse document frequency. A product matching a rare, specific feature like "Triple Moon Pentagram" scores higher than one matching a common term like "cotton". Products are ranked by total clause coverage — those satisfying all constraints outrank partial matches. When several candidates satisfy every disclosed clause equally (common for sibling colorways or sizes of the same listing), a log-compressed catalog review count breaks the tie, gated strictly behind full clause coverage so popularity never outranks relevance.
 
-**Validation** (`src/validation.py`) — Response schema enforcement. Deduplicates ASINs against the catalog, caps recommendations at the scored top 10, and wraps every response in a 3-level fallback chain. The agent never crashes.
+**Validation** (`starter/src/validation.py`) — Response schema enforcement. Deduplicates ASINs against the catalog, caps recommendations at the scored top 10, and wraps every response in a 3-level fallback chain (`starter/src/fallback.py`). The agent never crashes.
 
 ### Key Design Decisions
 
@@ -90,11 +90,11 @@ Agent: "What matters most to you?" + [10 recommendations]
 
 **2. Every constraint is a search clause, not a keyword.** "High quality mesh for maximum breathability" is matched as a phrase against product descriptions, not broken into individual words where "high" and "quality" dilute the signal.
 
-**3. Rare constraints matter more.** IDF weighting ensures "Triple Moon Pentagram" (appears in 1 product) contributes more to ranking than "cotton" (appears in 5,000). This is what pushes the exact target to rank 1 in 61% of hits.
+**3. Rare constraints matter more.** IDF weighting ensures "Triple Moon Pentagram" (appears in 1 product) contributes more to ranking than "cotton" (appears in 5,000). Once every disclosed clause is satisfied, a review-count tie-break separates sibling listings that read identically to BM25. Together this pushes the exact target to rank 1 in 60% of hits.
 
 **4. Override doesn't mean start over.** When a customer says "actually, forget leather — I want cotton", the agent keeps their color and size preferences while only replacing the material constraint. Compatible context survives the pivot.
 
-**5. No LLM, no embeddings, no dependencies.** The entire agent runs on Python's standard library. SQLite FTS5 handles full-text search. This makes the system reproducible from a clean checkout in under 5 seconds, resilient to network outages, and suitable for offline evaluation.
+**5. No LLM required, no embeddings, no hard dependencies.** The entire agent runs on Python's standard library by default. SQLite FTS5 handles full-text search. This makes the system reproducible from a clean checkout in under 5 seconds, resilient to network outages, and suitable for offline evaluation. An optional, off-by-default Claude-assisted parsing tier exists for future experimentation, but none of the results above depend on it.
 
 **6. Explanations reflect real match quality.** The message tells the customer how many of the recommendations actually satisfy everything they've disclosed, using the same coverage score retrieval already computes. *"Based on leather, here's what I found that matches everything you mentioned"* changes to *"...here's the closest match I could find"* when nothing fully lines up.
 
@@ -119,7 +119,7 @@ python3 -m scripts.analyze_results
 
 ## Limitations
 
-- **BM25 ceiling**: 14/200 sessions (7%) miss because keyword matching cannot distinguish the target from near-identical products. Dense retrieval (sentence-transformers) would address this by matching on meaning rather than exact terms.
+- **BM25 ceiling**: 5/200 sessions (2.5%) miss because keyword matching cannot distinguish the target from near-identical products, even after review-count tie-breaking. Dense retrieval (sentence-transformers) would address this by matching on meaning rather than exact terms.
 - **No semantic reranking**: A cross-encoder over the BM25 top-50 could promote borderline candidates, improving MRR on sessions where the target sits at rank 8-10.
 - **Profile underutilized**: User preference tags (comfort, fit, durability) serve as a first-turn fallback but don't boost retrieval weights.
 - **Evaluator-tuned**: The strict NLU tier is built against the evaluator's templates. The paraphrase fallback adds robustness but hasn't been validated against real human shoppers.
