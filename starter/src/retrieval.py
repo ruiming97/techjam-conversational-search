@@ -208,14 +208,26 @@ class RetrievalModule:
             )
             excluded_asins.update(asin for asin, _score in matching)
 
-        def score(item: tuple[str, list[float]]) -> tuple[float, float, float, float, str]:
+        def score(item: tuple[str, list[float]]) -> tuple[float, float, float, float, float, str]:
             asin, (complete_count, phrase_count, bm25_evidence, budget_evidence) = item
             # Complete-clause coverage is lexicographically dominant.  This
             # implements AND-style preference across multiple statements;
             # phrase evidence then separates feature text from coincidental
-            # bag-of-words matches, and BM25 only resolves remaining ties.
+            # bag-of-words matches.  A disclosed constraint is frequently
+            # boilerplate shared by an entire product line (a common
+            # material plus one or two generic care/closure phrases), so
+            # once every disclosed clause is fully satisfied, coverage and
+            # phrase evidence alone often leave many sibling listings
+            # genuinely tied, and BM25 field-length overlap among such
+            # near-duplicates is itself close to arbitrary.  Review count
+            # breaks that tie toward the more established listing.  Gate
+            # this strictly on full coverage: with no disclosed constraint
+            # yet, or only a partial match, BM25 relevance to the
+            # customer's own words remains the best available signal, and
+            # popularity must not override it.
             coverage = complete_count / total_clause_weight if total_clause_weight else 0.0
-            return (coverage, budget_evidence, phrase_count, bm25_evidence, asin)
+            popularity = self._catalog.popularity(asin) if coverage >= 0.999 else 0.0
+            return (coverage, budget_evidence, phrase_count, popularity, bm25_evidence, asin)
 
         ordered = sorted(evidence.items(), key=score, reverse=True)
         # Negative preferences are a strong exclusion rather than a weak text

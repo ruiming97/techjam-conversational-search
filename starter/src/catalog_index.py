@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 from pathlib import Path
@@ -39,6 +40,7 @@ class CatalogIndex:
         self.catalog_path = Path(catalog_path)
         self.asin_set: set[str] = set()
         self.prices: dict[str, float] = {}
+        self.rating_counts: dict[str, int] = {}
         self.connection = sqlite3.connect(":memory:")
         self._clause_cache: dict[
             tuple[tuple[str, ...], int, str], tuple[tuple[tuple[str, float], ...], frozenset[str]]
@@ -63,6 +65,10 @@ class CatalogIndex:
                     self.prices[asin] = float(product.get("price"))
                 except (TypeError, ValueError):
                     pass
+                try:
+                    self.rating_counts[asin] = max(0, int(product.get("rating_number") or 0))
+                except (TypeError, ValueError):
+                    pass
                 batch.append((
                     asin,
                     _text(product.get("title")),
@@ -81,6 +87,23 @@ class CatalogIndex:
 
     def is_valid(self, asin: str) -> bool:
         return asin in self.asin_set
+
+    def popularity(self, asin: str) -> float:
+        """Return a log-compressed review-count signal for tie-breaking.
+
+        Many disclosed constraints (a common material plus one or two
+        boilerplate care/closure phrases) are satisfied identically by an
+        entire product line -- several sibling colorways or sizes of the
+        same item, all equally "correct" by text evidence alone. Review
+        count is a cheap, catalog-native signal that is otherwise unused by
+        retrieval and meaningfully distinguishes an established, frequently
+        purchased listing from an obscure variant when clause coverage,
+        phrase evidence, and BM25 leave a genuine tie. ``log1p`` keeps a
+        handful of outliers with tens of thousands of reviews from
+        overwhelming every other ranking signal.
+        """
+        count = self.rating_counts.get(asin, 0)
+        return math.log1p(count) if count > 0 else 0.0
 
     def nearest_price_matches(self, target: float, limit: int = 100) -> list[tuple[str, float]]:
         """Return catalog items nearest to a disclosed target price.
